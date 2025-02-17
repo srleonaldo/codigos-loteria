@@ -1,0 +1,145 @@
+import pandas as pd
+from itertools import combinations
+from collections import Counter
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from tkinter import ttk
+from fpdf import FPDF
+import openpyxl
+
+class AnaliseCombinacoesApp:
+    def _init_(self, root):
+        self.root = root
+        self.root.title("Análise de Combinações")
+        self.resultados = ""
+        self.resultados_por_tamanho = {}
+
+        # Botão para upload do arquivo
+        self.upload_button = tk.Button(root, text="Upload de Arquivo", command=self.upload_file)
+        self.upload_button.pack(pady=10)
+
+        # Barra de progresso
+        self.progress = ttk.Progressbar(root, orient="horizontal", length=400, mode="determinate")
+        self.progress.pack(pady=10)
+
+        # Rótulo para exibir o percentual de progresso
+        self.progress_label = tk.Label(root, text="Progresso: 0%")
+        self.progress_label.pack()
+
+        # Área de texto para exibir os resultados
+        self.text_area = tk.Text(root, wrap=tk.WORD, width=80, height=20)
+        self.text_area.pack(pady=10)
+
+        # Botão para exportar resultados em PDF
+        self.export_pdf_button = tk.Button(root, text="Exportar em PDF", command=self.export_to_pdf)
+        self.export_pdf_button.pack(pady=5)
+
+        # Botão para exportar resultados em XLSX
+        self.export_excel_button = tk.Button(root, text="Exportar em XLSX", command=self.export_to_excel)
+        self.export_excel_button.pack(pady=5)
+
+    def upload_file(self):
+        file_path = filedialog.askopenfilename(
+            filetypes=[("Arquivos Excel", ".xls;.xlsx")]
+        )
+        if not file_path:
+            return
+
+        try:
+            self.analisar_combinacoes(file_path)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao processar o arquivo: {e}")
+
+    def analisar_combinacoes(self, arquivo):
+        try:
+            df = pd.read_excel(arquivo)
+        except Exception as e:
+            raise Exception(f"Erro ao carregar o arquivo: {e}")
+
+        df = df.fillna("").astype(str)
+        sequencias = df.apply(lambda row: [int(x) for x in row if x.isdigit()], axis=1).tolist()
+        contador_combinacoes = Counter()
+        tamanhos_combinacoes = range(2, 20)  # Grupos de 2 a 19 números
+
+        total_tarefas = len(sequencias) * len(tamanhos_combinacoes)
+        tarefas_concluidas = 0
+
+        self.progress["maximum"] = total_tarefas
+        self.progress["value"] = 0
+
+        for seq in sequencias:
+            for tamanho in tamanhos_combinacoes:
+                if len(seq) >= tamanho:
+                    for combinacao in combinations(seq, tamanho):
+                        contador_combinacoes[(tamanho, combinacao)] += 1
+                tarefas_concluidas += 1
+                self.progress["value"] = tarefas_concluidas
+                self.progress_label.config(text=f"Progresso: {int((tarefas_concluidas / total_tarefas) * 100)}%")
+                self.root.update_idletasks()
+
+        # Filtrar as 10 combinações mais relevantes para cada tamanho
+        self.resultados_por_tamanho = {tamanho: [] for tamanho in tamanhos_combinacoes}
+        for (tamanho, combinacao), frequencia in contador_combinacoes.items():
+            self.resultados_por_tamanho[tamanho].append((combinacao, frequencia))
+
+        self.resultados = ""
+        for tamanho, combinacoes in sorted(self.resultados_por_tamanho.items()):
+            top_10_combinacoes = sorted(combinacoes, key=lambda x: x[1], reverse=True)[:10]
+            self.resultados += f"\nTop 10 combinações mais relevantes para grupos de {tamanho} números:\n"
+            for i, (combinacao, frequencia) in enumerate(top_10_combinacoes, 1):
+                self.resultados += f"{i}. Combinação: {combinacao}, Repetições: {frequencia}\n"
+
+        self.text_area.delete(1.0, tk.END)
+        self.text_area.insert(tk.END, self.resultados)
+        self.progress_label.config(text="Progresso: 100%")
+
+    def export_to_pdf(self):
+        if not self.resultados.strip():
+            messagebox.showwarning("Aviso", "Nenhum resultado para exportar!")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("Arquivos PDF", "*.pdf")]
+        )
+        if not file_path:
+            return
+
+        try:
+            pdf = FPDF()
+            pdf.add_page()
+            pdf.set_font("Arial", size=12)
+            for line in self.resultados.split("\n"):
+                pdf.cell(0, 10, line, ln=True)
+            pdf.output(file_path)
+            messagebox.showinfo("Sucesso", "Resultados exportados com sucesso!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar o PDF: {e}")
+
+    def export_to_excel(self):
+        if not self.resultados_por_tamanho:
+            messagebox.showwarning("Aviso", "Nenhum resultado para exportar!")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Arquivos Excel", "*.xlsx")]
+        )
+        if not file_path:
+            return
+
+        try:
+            with pd.ExcelWriter(file_path, engine="openpyxl") as writer:
+                for tamanho, combinacoes in self.resultados_por_tamanho.items():
+                    top_10_combinacoes = sorted(combinacoes, key=lambda x: x[1], reverse=True)[:10]
+                    df = pd.DataFrame(top_10_combinacoes, columns=["Combinação", "Repetições"])
+                    df.to_excel(writer, sheet_name=f"Grupo_{tamanho}", index=False)
+
+            messagebox.showinfo("Sucesso", "Resultados exportados em XLSX com sucesso!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar o XLSX: {e}")
+
+if __name__ == "_main_":
+    root = tk.Tk()
+    app = AnaliseCombinacoesApp(root)
+    root.mainloop()
